@@ -2,6 +2,8 @@
 
 `handle()` принимает текст или действие (кнопку) и возвращает ответ вида
 {"messages": [...], "buttons": [{"label", "action"}], "placeholder": str}.
+Меню, услуги, FAQ, обычная заявка и обратная связь не обращаются к модели:
+они работают и без ключа API, и при исчерпанном лимите провайдера.
 """
 
 import logging
@@ -23,6 +25,8 @@ MENU_BUTTONS = [
 ]
 CONFIRM_BUTTONS = [("Отправить заявку", "confirm"), ("Изменить", "edit"), ("Отмена", "cancel")]
 BACK = ("В меню", "menu")
+CANCEL = [("Отмена", "menu")]
+NO_SERVICE = "Пока не знаю"
 
 SOURCE_LABEL = {db.SOURCE_BOT_FLOW: "обычная заявка", db.SOURCE_AI: "заявка из ИИ-консультанта"}
 
@@ -38,15 +42,17 @@ def _reply(messages, buttons=(), placeholder="Напишите сообщени�
 
 
 def _menu(prefix: str | None = None):
-    text = "Выберите раздел в меню или напишите «меню»."
-    return _reply([prefix, text] if prefix else ["Здравствуйте! Я помощник рекламного агентства «Вектор».", text], MENU_BUTTONS)
+    hint = "Выберите раздел в меню или напишите «меню»."
+    head = prefix or "Здравствуйте! Я помощник рекламного агентства «Вектор»."
+    return _reply([head, hint], MENU_BUTTONS)
 
 
 def _draft_text(d: dict) -> str:
-    return (
-        "Черновик заявки:\n"
-        f"Имя: {d['name']}\nКонтакт: {d['contact']}\nЗадача: {d['description']}"
-    )
+    lines = ["Черновик заявки:", f"Имя: {d['name']}", f"Контакт: {d['contact']}"]
+    if d.get("service"):
+        lines.append(f"Услуга: {d['service']}")
+    lines.append(f"Задача: {d['problem']}")
+    return "\n".join(lines)
 
 
 def handle(s: Session, text: str | None, action: str | None):
@@ -73,25 +79,25 @@ def _on_action(s: Session, action: str):
         return _reply(["Наши услуги:", body], [("Оставить заявку", "lead_start"), BACK])
     if action == "faq":
         s.reset()
-        secs = knowledge.load_sections("faq.md")
-        buttons = [(x.title, f"faq:{i}") for i, x in enumerate(secs)] + [BACK]
-        return _reply("Частые вопросы. Выберите вопрос:", buttons)
+        cats = list(knowledge.faq_categories())
+        buttons = [(c, f"faqc:{i}") for i, c in enumerate(cats)] + [BACK]
+        return _reply("Частые вопросы. Выберите тему:", buttons)
+    if action.startswith("faqc:"):
+        return _faq_category(action[5:])
     if action.startswith("faq:"):
-        secs = knowledge.load_sections("faq.md")
-        try:
-            sec = secs[int(action[4:])]
-        except (ValueError, IndexError):
-            return _menu()
-        buttons = [("Другие вопросы", "faq"), ("Оставить заявку", "lead_start"), BACK]
-        return _reply([sec.title, sec.body], buttons)
+        return _faq_answer(action[4:])
     if action == "lead_start":
         s.reset()
-        s.state = "lead_name"
-        return _reply("Оформим заявку. Как вас зовут?", [("Отмена", "menu")], "Ваше имя")
+        s.state = "lead_service"
+        titles = knowledge.service_titles()
+        buttons = [(t, f"svc:{i}") for i, t in enumerate(titles)] + [(NO_SERVICE, "svc:none"), BACK]
+        return _reply("Оформим заявку. Какая услуга вас интересует?", buttons, "Или напишите название услуги")
+    if action.startswith("svc:") and s.state == "lead_service":
+        return _pick_service(s, action[4:])
     if action == "feedback_start":
         s.reset()
         s.state = "feedback"
-        return _reply("Напишите отзыв или пожелание — одним сообщением.", [("Отмена", "menu")], "Ваш отзыв")
+        return _reply("Напишите отзыв или пожелание — одним сообщением.", CANCEL, "Ваш отзыв")
     if action == "ai_start":
         s.reset()
         s.state = "ai"
@@ -110,6 +116,41 @@ def _on_action(s: Session, action: str):
     return _menu()
 
 
+def _faq_category(raw: str):
+    cats = knowledge.faq_categories()
+    names = list(cats)
+    try:
+        name = names[int(raw)]
+    except (ValueError, IndexError):
+        return _menu()
+    base = sum(len(cats[n]) for n in names[: names.index(name)])
+    buttons = [(q.title, f"faq:{base + i}") for i, q in enumerate(cats[name])]
+    return _reply(f"{name}. Выберите вопрос:", buttons + [("Другие темы", "faq"), BACK])
+
+
+def _faq_answer(raw: str):
+    flat = [q for qs in knowledge.faq_categories().values() for q in qs]
+    try:
+        sec = flat[int(raw)]
+    except (ValueError, IndexError):
+        return _menu()
+    buttons = [("Другие темы", "faq"), ("Оставить заявку", "lead_start"), BACK]
+    return _reply([sec.title, sec.body], buttons)
+
+
+def _pick_service(s: Session, raw: str):
+    titles = knowledge.service_titles()
+    if raw == "none":
+        s.form["service"] = ""
+    else:
+        try:
+            s.form["service"] = titles[int(raw)]
+        except (ValueError, IndexError):
+            return _menu()
+    s.state = "lead_name"
+    return _reply("Как вас зовут?", CANCEL, "Ваше имя")
+
+
 def _on_confirm_action(s: Session, action: str):
     if s.state == "lead_review":
         return _lead_review_action(s, action)
@@ -121,7 +162,14 @@ def _on_confirm_action(s: Session, action: str):
 def _lead_review_action(s: Session, action: str):
     if action == "confirm":
         f = s.form
-        lead_id = db.save_lead(db.SOURCE_BOT_FLOW, f["name"], f["contact"], f["description"])
+        lead_id = db.save_lead(
+            session_id=s.id,
+            source=db.SOURCE_BOT_FLOW,
+            name=f["name"],
+            contact=f["contact"],
+            problem_text=f["problem"],
+            service=f.get("service", ""),
+        )
         log.info("lead saved id=%s source=%s", lead_id, db.SOURCE_BOT_FLOW)
         s.reset()
         return _reply(
@@ -130,7 +178,7 @@ def _lead_review_action(s: Session, action: str):
         )
     if action == "edit":
         s.state = "lead_name"
-        return _reply("Хорошо, введём данные заново. Как вас зовут?", [("Отмена", "menu")], "Ваше имя")
+        return _reply("Хорошо, введём данные заново. Как вас зовут?", CANCEL, "Ваше имя")
     s.reset()
     return _menu("Заявка отменена.")
 
@@ -165,31 +213,42 @@ def _on_text(s: Session, text: str):
     if text.lower() in ("меню", "/menu", "/start"):
         return _on_action(s, "menu")
     st = s.state
+    if st == "lead_service":
+        low = text.lower()
+        titles = knowledge.service_titles()
+        for i, t in enumerate(titles):
+            if low == t.lower():
+                return _pick_service(s, str(i))
+        return _reply(
+            "Выберите услугу кнопкой ниже или напишите её название точно.",
+            [(t, f"svc:{i}") for i, t in enumerate(titles)] + [(NO_SERVICE, "svc:none"), BACK],
+            "Или напишите название услуги",
+        )
     if st == "lead_name":
         value, err = validation.check_name(text)
         if err:
-            return _reply(err, [("Отмена", "menu")], "Ваше имя")
+            return _reply(err, CANCEL, "Ваше имя")
         s.form["name"], s.state = value, "lead_contact"
-        return _reply("Как с вами связаться? E-mail, телефон или Telegram.", [("Отмена", "menu")], "Контакт")
+        return _reply("Как с вами связаться? E-mail, телефон или Telegram.", CANCEL, "Контакт")
     if st == "lead_contact":
         value, err = validation.check_contact(text)
         if err:
-            return _reply(err, [("Отмена", "menu")], "Контакт")
+            return _reply(err, CANCEL, "Контакт")
         s.form["contact"], s.state = value, "lead_desc"
-        return _reply("Коротко опишите задачу.", [("Отмена", "menu")], "Описание задачи")
+        return _reply("Коротко опишите задачу.", CANCEL, "Описание задачи")
     if st == "lead_desc":
         value, err = validation.check_description(text)
         if err:
-            return _reply(err, [("Отмена", "menu")], "Описание задачи")
-        s.form["description"], s.state = value, "lead_review"
+            return _reply(err, CANCEL, "Описание задачи")
+        s.form["problem"], s.state = value, "lead_review"
         return _reply([_draft_text(s.form), "Отправить заявку?"], CONFIRM_BUTTONS)
     if st == "lead_review":
         return _reply("Выберите действие кнопкой ниже.", CONFIRM_BUTTONS)
     if st == "feedback":
         msg = validation.clean(text)
         if len(msg) < 3:
-            return _reply("Слишком коротко. Напишите отзыв подробнее.", [("Отмена", "menu")], "Ваш отзыв")
-        fb_id = db.save_feedback(msg)
+            return _reply("Слишком коротко. Напишите отзыв подробнее.", CANCEL, "Ваш отзыв")
+        fb_id = db.save_feedback(s.id, msg)
         log.info("feedback saved id=%s", fb_id)
         s.reset()
         return _reply(f"Спасибо! Отзыв №{fb_id} сохранён.", MENU_BUTTONS)
@@ -203,6 +262,5 @@ def _ai_turn(s: Session, text: str):
     messages = [result.text]
     if result.draft_updated and s.draft:
         messages.append(_draft_text(s.draft))
-    if s.draft and result.draft_updated:
         return _reply(messages, CONFIRM_BUTTONS, "Продолжить диалог…")
     return _reply(messages, [("Помоги с заявкой", "ai_lead_help"), BACK], "Ваш вопрос консультанту")

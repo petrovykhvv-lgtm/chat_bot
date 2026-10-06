@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import db  # noqa: E402
 
+db.init_db()
 for table in ("leads", "feedback"):
     rows = db.fetch_all(table)
     print(f"== {table} ({len(rows)}) ==")

@@ -18,6 +18,7 @@ class Section:
     file: str
     title: str
     body: str
+    category: str = ""
 
 
 def _root():
@@ -60,27 +61,42 @@ def read_file(name: object) -> str:
 
 
 def load_sections(only: str | None = None) -> list[Section]:
-    """Делит файлы на разделы по заголовкам `## `."""
+    """Делит файлы на разделы по `## `; заголовок `# ` задаёт категорию."""
     sections: list[Section] = []
     for name in list_files():
         if only and name != only:
             continue
-        title, lines = "", []
+        category, title, lines = "", "", []
         text = (_root() / name).read_text(encoding="utf-8")
 
         def flush():
             body = "\n".join(lines).strip()
             if title and body:
-                sections.append(Section(name, title, body))
+                sections.append(Section(name, title, body, category))
 
         for line in text.splitlines():
             if line.startswith("## "):
                 flush()
                 title, lines = line[3:].strip(), []
+            elif line.startswith("# "):
+                flush()
+                category, title, lines = line[2:].strip(), "", []
             else:
                 lines.append(line)
         flush()
     return sections
+
+
+def faq_categories() -> dict[str, list[Section]]:
+    """FAQ по категориям в порядке следования в файле."""
+    result: dict[str, list[Section]] = {}
+    for sec in load_sections("faq.md"):
+        result.setdefault(sec.category, []).append(sec)
+    return result
+
+
+def service_titles() -> list[str]:
+    return [s.title for s in load_sections("services.md")]
 
 
 def _tokens(text: str) -> set[str]:

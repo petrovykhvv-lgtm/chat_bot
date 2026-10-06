@@ -106,8 +106,11 @@ def _mock_reply(session: Session, user_text: str) -> str:
     if "заявк" in user_text.lower() or _FIELD.search(user_text):
         found = {k.lower(): v.strip() for k, v in _FIELD.findall(user_text)}
         if {"имя", "контакт", "задача"} <= found.keys():
+            hits = knowledge.search(found["задача"], limit=1)
+            service = hits[0][0].title if hits and hits[0][0].file == "services.md" else ""
             err = tools.prepare_lead_draft(
-                session, found["имя"], found["контакт"], found["задача"]
+                session, found["имя"], found["контакт"], found["задача"], service,
+                summary="Демо-режим: сводка модели недоступна.",
             )
             return (
                 "Подготовил черновик заявки. Проверьте его ниже."

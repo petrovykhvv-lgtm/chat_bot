@@ -95,13 +95,17 @@ def test_menu_services_faq(client):
     assert [b["action"] for b in d["buttons"]][:2] == ["services", "faq"]
     assert "Контекстная реклама" in " ".join(chat(client, action="services")["messages"])
     faq = chat(client, action="faq")
-    assert len(faq["buttons"]) > 2
-    assert "4 часов" in " ".join(chat(client, action="faq:0")["messages"])
+    assert len(faq["buttons"]) > 4
+    cat = chat(client, action="faqc:1")  # «Стоимость»
+    assert "Стоимость" in cat["messages"][0]
+    ans = chat(client, action=cat["buttons"][0]["action"])
+    assert "рекламный бюджет" in " ".join(ans["messages"]).lower()
 
 
 def test_sources_and_feedback_are_separate(client):
     # обычная заявка
     chat(client, action="lead_start")
+    chat(client, action="svc:0")
     chat(client, text="Иван")
     chat(client, text="ivan@example.com")
     d = chat(client, text="Нужна реклама в VK")
@@ -125,8 +129,11 @@ def test_sources_and_feedback_are_separate(client):
         ("bot_flow", "Иван"),
         ("ai_consultant", "Мария"),
     ]
+    assert leads[0]["service"] == "Контекстная реклама" and leads[0]["status"] == "new"
+    assert leads[0]["session_id"] == "sess-0001"
     fb = db.fetch_all("feedback")
-    assert len(fb) == 1 and fb[0]["message"] == "Удобный интерфейс"
+    assert len(fb) == 1 and fb[0]["message_text"] == "Удобный интерфейс"
+    assert fb[0]["session_id"] == "sess-0001"
 
 
 def test_cancel_draft_saves_nothing(client):
@@ -143,3 +150,84 @@ def test_bad_session_id_and_long_text_rejected(client):
         client.post("/api/chat", json={"session_id": "sess-0001", "text": "a" * 5000}).status_code
         == 422
     )
+
+
+# --- фаза 2: схема, FAQ, автономность bot-flow -----------------------------
+
+
+def test_schema_columns():
+    import sqlite3
+
+    with sqlite3.connect(config.DB_PATH) as conn:
+        cols = lambda t: {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+    assert {"session_id", "source", "service", "contact", "problem_text",
+            "agent_summary", "missing_info", "status", "created_at"} <= cols("leads")
+    assert {"session_id", "message_text", "created_at"} <= cols("feedback")
+
+
+def test_source_check_constraint():
+    import sqlite3
+
+    with pytest.raises(sqlite3.IntegrityError):
+        db.save_lead(session_id="s", source="other", name="Иван", contact="a@b.ru", problem_text="x")
+
+
+def test_faq_has_four_categories_with_answers(client):
+    d = chat(client, action="faq")
+    cats = [b for b in d["buttons"] if b["action"].startswith("faqc:")]
+    assert len(cats) >= 4
+    for c in cats:
+        qs = chat(client, action=c["action"])
+        q = next(b for b in qs["buttons"] if b["action"].startswith("faq:"))
+        assert chat(client, action=q["action"])["messages"][1]
+
+
+def test_catalog_has_3_to_5_services_with_price():
+    secs = knowledge.load_sections("services.md")
+    assert 3 <= len(secs) <= 5
+    assert all("от" in s.body and "₽" in s.body for s in secs)
+
+
+def test_unknown_input_does_not_break_flow(client):
+    assert "Не понял" in " ".join(chat(client, text="абракадабра")["messages"])
+    assert chat(client, action="no_such_action")["buttons"]
+    chat(client, action="lead_start")
+    assert "кнопкой" in " ".join(chat(client, text="что-то")["messages"])  # шаг выбора услуги
+    chat(client, action="svc:none")
+    assert "Имя" in " ".join(chat(client, text="я")["messages"])  # валидация, шаг не сдвинулся
+    assert chat(client, text="меню")["buttons"][0]["action"] == "services"
+
+
+def test_bot_flow_works_without_model(client, monkeypatch):
+    import agent_runtime
+
+    def boom(*a, **k):
+        raise AssertionError("bot-flow не должен обращаться к модели")
+
+    monkeypatch.setattr(agent_runtime, "respond", boom)
+    monkeypatch.setattr(agent_runtime, "_model_reply", boom)
+    chat(client, action="services")
+    chat(client, action="faq")
+    chat(client, action="lead_start")
+    chat(client, action="svc:none")
+    chat(client, text="Иван")
+    chat(client, text="+7 900 123-45-67")
+    chat(client, text="Нужна реклама для кафе")
+    chat(client, action="confirm")
+    chat(client, action="feedback_start")
+    chat(client, text="Всё понятно")
+    assert len(db.fetch_all("leads")) == 1 and len(db.fetch_all("feedback")) == 1
+
+
+def test_ai_failure_degrades_gracefully(client, monkeypatch):
+    import agent_runtime
+
+    monkeypatch.setattr(config, "AI_API_KEY", "dummy-key-for-test")
+
+    def limit(*a, **k):
+        raise RuntimeError("429 quota exceeded")
+
+    monkeypatch.setattr(agent_runtime, "_model_reply", limit)
+    chat(client, action="ai_start")
+    d = chat(client, text="Сколько стоит реклама?")
+    assert "недоступен" in d["messages"][0] and d["buttons"]

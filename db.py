@@ -7,20 +7,27 @@ import config
 
 SOURCE_BOT_FLOW = "bot_flow"
 SOURCE_AI = "ai_consultant"
+STATUS_NEW = "new"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS leads (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    source      TEXT NOT NULL CHECK (source IN ('bot_flow', 'ai_consultant')),
-    name        TEXT NOT NULL,
-    contact     TEXT NOT NULL,
-    description TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT NOT NULL,
+    source        TEXT NOT NULL CHECK (source IN ('bot_flow', 'ai_consultant')),
+    service       TEXT NOT NULL DEFAULT '',
+    name          TEXT NOT NULL,
+    contact       TEXT NOT NULL,
+    problem_text  TEXT NOT NULL,
+    agent_summary TEXT NOT NULL DEFAULT '',
+    missing_info  TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'new',
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 CREATE TABLE IF NOT EXISTS feedback (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    message     TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT NOT NULL,
+    message_text  TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 """
 
@@ -37,18 +44,33 @@ def init_db() -> None:
         conn.executescript(SCHEMA)
 
 
-def save_lead(source: str, name: str, contact: str, description: str) -> int:
+def save_lead(
+    *,
+    session_id: str,
+    source: str,
+    name: str,
+    contact: str,
+    problem_text: str,
+    service: str = "",
+    agent_summary: str = "",
+    missing_info: str = "",
+) -> int:
     with closing(_connect()) as conn, conn:
         cur = conn.execute(
-            "INSERT INTO leads (source, name, contact, description) VALUES (?, ?, ?, ?)",
-            (source, name, contact, description),
+            "INSERT INTO leads (session_id, source, service, name, contact, problem_text,"
+            " agent_summary, missing_info, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, source, service, name, contact, problem_text,
+             agent_summary, missing_info, STATUS_NEW),
         )
         return int(cur.lastrowid)
 
 
-def save_feedback(message: str) -> int:
+def save_feedback(session_id: str, message_text: str) -> int:
     with closing(_connect()) as conn, conn:
-        cur = conn.execute("INSERT INTO feedback (message) VALUES (?)", (message,))
+        cur = conn.execute(
+            "INSERT INTO feedback (session_id, message_text) VALUES (?, ?)",
+            (session_id, message_text),
+        )
         return int(cur.lastrowid)
 
 

@@ -31,13 +31,30 @@ def read_knowledge_file(filename: str) -> str:
         return f"Ошибка: {e} Доступные файлы: {files}"
 
 
-def prepare_lead_draft(session: Session, name: str, contact: str, description: str) -> str:
+def _service_or_empty(value: object) -> str:
+    """Приводит услугу к названию из каталога; неизвестное — пустая строка."""
+    v = validation.clean(value).lower()
+    for title in knowledge.service_titles():
+        if v == title.lower():
+            return title
+    return ""
+
+
+def prepare_lead_draft(
+    session: Session,
+    name: str,
+    contact: str,
+    problem: str,
+    service: str = "",
+    summary: str = "",
+    missing_info: str = "",
+) -> str:
     """Готовит черновик. Ничего не сохраняет в БД."""
     fields, errors = {}, []
     for key, check, value in (
         ("name", validation.check_name, name),
         ("contact", validation.check_contact, contact),
-        ("description", validation.check_description, description),
+        ("problem", validation.check_description, problem),
     ):
         ok, err = check(value)
         if err:
@@ -46,6 +63,9 @@ def prepare_lead_draft(session: Session, name: str, contact: str, description: s
             fields[key] = ok
     if errors:
         return "Черновик не создан. Уточните у пользователя: " + " ".join(errors)
+    fields["service"] = _service_or_empty(service)
+    fields["summary"] = validation.clean(summary)[:500]
+    fields["missing_info"] = validation.clean(missing_info)[:300]
     session.draft = fields
     session.user_confirmed = False
     return (
@@ -59,7 +79,16 @@ def save_confirmed_lead(session: Session) -> int | None:
     if not session.draft or not session.user_confirmed:
         return None
     d = session.draft
-    lead_id = db.save_lead(db.SOURCE_AI, d["name"], d["contact"], d["description"])
+    lead_id = db.save_lead(
+        session_id=session.id,
+        source=db.SOURCE_AI,
+        name=d["name"],
+        contact=d["contact"],
+        problem_text=d["problem"],
+        service=d["service"],
+        agent_summary=d["summary"],
+        missing_info=d["missing_info"],
+    )
     session.draft = None
     session.user_confirmed = False
     log.info("lead saved id=%s source=%s", lead_id, db.SOURCE_AI)
@@ -104,9 +133,21 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "name": {"type": "string"},
                     "contact": {"type": "string", "description": "E-mail, телефон или @telegram"},
-                    "description": {"type": "string"},
+                    "problem": {"type": "string", "description": "Задача пользователя его словами"},
+                    "service": {
+                        "type": "string",
+                        "description": "Название услуги из services.md или пустая строка, если не ясно",
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Сводка для менеджера в 1–2 предложения",
+                    },
+                    "missing_info": {
+                        "type": "string",
+                        "description": "Что менеджеру ещё нужно уточнить (бюджет, сроки…), либо пусто",
+                    },
                 },
-                "required": ["name", "contact", "description"],
+                "required": ["name", "contact", "problem"],
             },
         },
     },
@@ -128,7 +169,13 @@ def execute_tool(session: Session, name: str, raw_args: str) -> str:
             return read_knowledge_file(args.get("filename", ""))
         if name == "prepare_lead_draft":
             return prepare_lead_draft(
-                session, args.get("name"), args.get("contact"), args.get("description")
+                session,
+                args.get("name"),
+                args.get("contact"),
+                args.get("problem"),
+                args.get("service", ""),
+                args.get("summary", ""),
+                args.get("missing_info", ""),
             )
     except Exception as e:  # noqa: BLE001 — не роняем диалог из-за tool
         log.warning("tool %s failed: %s", name, type(e).__name__)
