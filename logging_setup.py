@@ -12,7 +12,7 @@ import config
 
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 _PHONE = re.compile(r"(?<!\w)\+?\d[\d\s().-]{8,}\d")
-_KEY = re.compile(r"(AIza[\w-]{20,}|AQ\.[\w.-]{20,}|sk-[\w-]{16,}|Bearer\s+[\w.-]{16,})")
+_KEY = re.compile(r"(AIza[\w-]{20,}|AQ\.[\w.-]{20,}|sk-[\w-]{16,}|Bearer\s+[\w.-]{16,}|\d{6,}:[A-Za-z0-9_-]{30,})")
 
 
 class RedactFilter(logging.Filter):

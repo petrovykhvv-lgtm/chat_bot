@@ -3,6 +3,8 @@ from fastapi.testclient import TestClient
 
 import config
 import db
+import ratelimit
+import sessions
 from agent import knowledge, tools
 from sessions import Session
 
@@ -11,6 +13,10 @@ from sessions import Session
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "t.sqlite3")
     monkeypatch.setattr(config, "AI_API_KEY", "")  # демо-режим, без сети
+    monkeypatch.setattr(config, "TELEGRAM_BOT_TOKEN", "")  # без отправки в Telegram
+    monkeypatch.setattr(sessions, "store", sessions.SessionStore())  # чистые сессии на каждый тест
+    ratelimit.ip_window.reset()
+    ratelimit.ai_window.reset()
     db.init_db()
 
 
@@ -61,7 +67,7 @@ def test_prepare_draft_does_not_save():
 
 
 def test_save_requires_user_confirmation():
-    s = Session("x")
+    s = Session("x", consent_at="2026-01-01T00:00:00Z")
     tools.prepare_lead_draft(s, "Анна", "anna@example.com", "Нужна реклама")
     assert tools.save_confirmed_lead(s) is None
     assert db.fetch_all("leads") == []
@@ -81,6 +87,10 @@ def client():
     import server
 
     with TestClient(server.app) as c:
+        # Сессия по умолчанию уже дала согласие; шлюз согласия проверяют отдельные тесты.
+        s = sessions.store.get("sess-0001")
+        s.consent_at = "2026-01-01T00:00:00Z"
+        sessions.store.save(s)
         yield c
 
 

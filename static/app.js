@@ -115,6 +115,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, ...payload }),
       });
+      if (res.status === 429) throw new Error("rate");
       if (!res.ok) throw new Error(String(res.status));
       const data = await res.json();
       typing.remove();
@@ -123,9 +124,11 @@
       setButtons(data.buttons);
       $input.placeholder = data.placeholder;
       persist();
-    } catch {
+    } catch (err) {
       typing.remove();
-      addMessage("bot", "Не удалось связаться с сервером. Попробуйте ещё раз.", false);
+      addMessage("bot", err.message === "rate"
+        ? "Слишком много запросов. Подождите минуту и попробуйте снова."
+        : "Не удалось связаться с сервером. Попробуйте ещё раз.", false);
     } finally {
       setBusy(false);
       $input.focus();

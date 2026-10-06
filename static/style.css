@@ -289,6 +289,10 @@ body {
 #send:hover:not(:disabled) { transform: scale(1.06); }
 #send:disabled { opacity: .5; cursor: default; box-shadow: none; }
 
+.legal { margin: -6px 0 12px; text-align: center; font-size: 12px; }
+.legal a { color: var(--muted); text-decoration: none; }
+.legal a:hover { color: var(--accent-deep); text-decoration: underline; }
+
 /* --- без backdrop-filter --- */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .nav, .chat { background: rgba(255, 250, 247, 0.92); }

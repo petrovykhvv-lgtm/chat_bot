@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import ai_client
 import config
-from agent import knowledge, tools
+from agent import guard, knowledge, tools
 from sessions import Session
 
 log = logging.getLogger(__name__)
@@ -33,6 +33,16 @@ class AgentResult:
     draft_updated: bool = False
 
 
+def _guarded(session: Session, user_text: str, reply: str) -> str:
+    """Блокирует ответ, если в нём есть цифры, которых нет в базе знаний и в словах пользователя."""
+    user_texts = [m["content"] for m in session.ai_history if m["role"] == "user"] + [user_text]
+    bad = guard.violations(reply, user_texts)
+    if bad:
+        log.warning("guard blocked a reply: %d unsupported figure(s)", len(bad))
+        return guard.BLOCKED_TEXT
+    return reply
+
+
 def _draft_context(d: dict) -> str:
     return (
         "Текущий черновик заявки (пользователь нажал «Изменить» и хочет что-то поправить). "
@@ -48,6 +58,8 @@ def respond(session: Session, user_text: str) -> AgentResult:
     session.current_text = user_text
     try:
         text = _mock_reply(session, user_text) if is_mock() else _model_reply(session, user_text)
+        if not is_mock():
+            text = _guarded(session, user_text, text)
     except Exception as e:  # noqa: BLE001
         # В лог — только тип ошибки: в тексте исключения могут быть ключ или данные.
         log.error("agent failed: %s", type(e).__name__)

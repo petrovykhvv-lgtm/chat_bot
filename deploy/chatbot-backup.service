@@ -1,0 +1,15 @@
+[Unit]
+Description=Vector chat bot: daily SQLite backup and data retention purge
+
+[Service]
+Type=oneshot
+User=chatbot
+WorkingDirectory=/opt/chatbot
+EnvironmentFile=/opt/chatbot/.env
+ExecStart=/opt/chatbot/.venv/bin/python scripts/backup_db.py
+ExecStart=/opt/chatbot/.venv/bin/python scripts/manage_data.py purge
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true

@@ -8,8 +8,13 @@
 
 import logging
 
+from datetime import datetime, timezone
+
 import agent_runtime
+import config
 import db
+import notify
+import ratelimit
 import validation
 from agent import knowledge, tools
 from sessions import LEAD_HELP_TEXT, Session
@@ -27,6 +32,16 @@ CONFIRM_BUTTONS = [("Отправить заявку", "confirm"), ("Измен�
 BACK = ("В меню", "menu")
 CANCEL = [("Отмена", "menu")]
 NO_SERVICE = "Пока не знаю"
+
+CONSENT_BUTTONS = [("Согласен(на)", "consent_yes"), ("Не согласен(на)", "consent_no")]
+GATED = ("lead_start", "ai_start")  # действия, где собираются персональные данные
+CONSENT_TEXT = (
+    "Для заявки и консультации нужно ваше согласие на обработку персональных данных. "
+    "Мы обрабатываем имя, контакт и текст запроса, чтобы менеджер связался с вами, и храним их "
+    f"до {max(1, config.RETENTION_DAYS // 30)} мес. Заявку видит менеджер агентства. "
+    "Сообщения консультанту обрабатывает внешний сервис ИИ (Google AI Studio). "
+    "Полный текст: ссылка «Политика данных» под чатом. Согласие можно отозвать, написав по адресу из политики."
+)
 
 SOURCE_LABEL = {db.SOURCE_BOT_FLOW: "обычная заявка", db.SOURCE_AI: "заявка из ИИ-консультанта"}
 
@@ -81,10 +96,28 @@ def handle(s: Session, text: str | None, action: str | None):
 # --- кнопки ---------------------------------------------------------------
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _on_action(s: Session, action: str):
     if action in ("start", "menu"):
         s.reset()
         return _menu()
+    if action in GATED and not s.consent_at:
+        s.reset()
+        s.state, s.pending_action = "consent", action  # продолжим после согласия
+        return _reply(CONSENT_TEXT, CONSENT_BUTTONS + [BACK])
+    if action == "consent_yes":
+        pending, s.pending_action = s.pending_action, ""
+        s.consent_at = s.consent_at or _now()
+        return _on_action(s, pending) if pending in GATED else _menu("Согласие сохранено.")
+    if action == "consent_no":
+        s.reset()
+        return _menu(
+            "Без согласия на обработку данных заявку и консультанта предоставить не можем. "
+            "Услуги и FAQ доступны без согласия."
+        )
     if action == "services":
         s.reset()
         secs = knowledge.load_sections("services.md")
@@ -182,8 +215,10 @@ def _lead_review_action(s: Session, action: str):
             contact=f["contact"],
             problem_text=f["problem"],
             service=f.get("service", ""),
+            consent_at=s.consent_at,
         )
         log.info("lead saved id=%s source=%s", lead_id, db.SOURCE_BOT_FLOW)
+        notify.notify_lead(lead_id, db.SOURCE_BOT_FLOW, f)
         s.reset()
         return _reply(
             f"Заявка №{lead_id} отправлена ({SOURCE_LABEL[db.SOURCE_BOT_FLOW]}). Менеджер свяжется с вами.",
@@ -235,6 +270,8 @@ def _on_text(s: Session, text: str):
     if text.lower() in ("меню", "/menu", "/start"):
         return _on_action(s, "menu")
     st = s.state
+    if st == "consent":
+        return _reply("Выберите ответ кнопкой ниже.", CONSENT_BUTTONS + [BACK])
     if st == "lead_service":
         low = text.lower()
         titles = knowledge.service_titles()
@@ -280,6 +317,9 @@ def _on_text(s: Session, text: str):
 
 
 def _ai_turn(s: Session, text: str):
+    limited = ratelimit.check_ai(s.id, counts_toward_daily=not agent_runtime.is_mock())
+    if limited:
+        return _reply([limited], [("Помоги с заявкой", "ai_lead_help"), BACK], "Ваш вопрос консультанту")
     result = agent_runtime.respond(s, text)
     messages = [result.text]
     if result.draft_updated and s.draft:

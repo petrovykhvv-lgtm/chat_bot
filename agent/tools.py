@@ -9,6 +9,7 @@ import json
 import logging
 
 import db
+import notify
 import validation
 from agent import knowledge
 from sessions import LEAD_HELP_TEXT, Session
@@ -94,7 +95,7 @@ def prepare_lead_draft(
 
 def save_confirmed_lead(session: Session) -> int | None:
     """Сохраняет черновик, только если пользователь подтвердил его кнопкой."""
-    if not session.draft or not session.user_confirmed:
+    if not session.draft or not session.user_confirmed or not session.consent_at:
         return None
     d = session.draft
     lead_id = db.save_lead(
@@ -107,11 +108,13 @@ def save_confirmed_lead(session: Session) -> int | None:
         agent_summary=d["summary"],
         missing_info=d["missing_info"],
         source_message=d["source_message"],
+        consent_at=session.consent_at,
     )
     session.draft = None
     session.draft_editing = False
     session.user_confirmed = False
     log.info("lead saved id=%s source=%s", lead_id, db.SOURCE_AI)
+    notify.notify_lead(lead_id, db.SOURCE_AI, d)
     return lead_id
 
 
