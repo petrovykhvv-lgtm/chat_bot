@@ -33,8 +33,19 @@ class AgentResult:
     draft_updated: bool = False
 
 
+def _draft_context(d: dict) -> str:
+    return (
+        "Текущий черновик заявки (пользователь нажал «Изменить» и хочет что-то поправить). "
+        "Возьми его значения, внеси правку пользователя и вызови prepare_lead_draft заново "
+        "со ВСЕМИ полями; если правка неясна, задай один уточняющий вопрос.\n"
+        f"name={d['name']}; contact={d['contact']}; service={d['service']}; "
+        f"problem={d['problem']}; summary={d['summary']}; missing_info={d['missing_info']}"
+    )
+
+
 def respond(session: Session, user_text: str) -> AgentResult:
     before = session.draft
+    session.current_text = user_text
     try:
         text = _mock_reply(session, user_text) if is_mock() else _model_reply(session, user_text)
     except Exception as e:  # noqa: BLE001
@@ -64,7 +75,10 @@ def _tool_call_dict(call) -> dict:
 
 def _model_reply(session: Session, user_text: str) -> str:
     system = config.SOUL_PATH.read_text(encoding="utf-8")
-    messages = [{"role": "system", "content": system}, *session.ai_history]
+    messages = [{"role": "system", "content": system}]
+    if session.draft and session.draft_editing:
+        messages.append({"role": "system", "content": _draft_context(session.draft)})
+    messages += session.ai_history
     messages.append({"role": "user", "content": user_text})
     for _ in range(config.MAX_TOOL_ITERATIONS):
         resp = ai_client.chat(messages, tools.TOOL_SCHEMAS)
@@ -89,12 +103,32 @@ def _model_reply(session: Session, user_text: str) -> str:
 _FIELD = re.compile(r"(имя|контакт|задача)\s*[:\-—]\s*([^,;\n]+)", re.IGNORECASE)
 
 
+_EDIT = re.compile(r"(имя|контакт|задача|услуга)\s*[:\-—]\s*(.+)", re.IGNORECASE)
+
+
+def _mock_edit(session: Session, user_text: str) -> str | None:
+    """Правка одного поля черновика в демо-режиме: «контакт — name@mail.ru»."""
+    m = _EDIT.search(user_text)
+    if not (session.draft and session.draft_editing and m):
+        return None
+    d = dict(session.draft)
+    key = {"имя": "name", "контакт": "contact", "задача": "problem", "услуга": "service"}[m.group(1).lower()]
+    d[key] = m.group(2).strip()
+    err = tools.prepare_lead_draft(
+        session, d["name"], d["contact"], d["problem"], d["service"], d["summary"], d["missing_info"]
+    )
+    return "Обновил черновик. Проверьте его ниже." if session.draft is not d and "не создан" not in err else err
+
+
 def _mock_reply(session: Session, user_text: str) -> str:
+    edited = _mock_edit(session, user_text)
+    if edited:
+        return edited
     if "заявк" in user_text.lower() or _FIELD.search(user_text):
         found = {k.lower(): v.strip() for k, v in _FIELD.findall(user_text)}
         if {"имя", "контакт", "задача"} <= found.keys():
-            hits = knowledge.search(found["задача"], limit=1)
-            service = hits[0][0].title if hits and hits[0][0].file == "services.md" else ""
+            hits = [h for h, _ in knowledge.search(found["задача"], limit=20) if h.file == "services.md"]
+            service = hits[0].title if hits else ""
             err = tools.prepare_lead_draft(
                 session, found["имя"], found["контакт"], found["задача"], service,
                 summary="Демо-режим: сводка модели недоступна.",

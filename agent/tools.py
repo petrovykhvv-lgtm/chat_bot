@@ -11,7 +11,7 @@ import logging
 import db
 import validation
 from agent import knowledge
-from sessions import Session
+from sessions import LEAD_HELP_TEXT, Session
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,19 @@ def _service_or_empty(value: object) -> str:
     return ""
 
 
+def _source_message(session: Session) -> str:
+    """Исходный запрос: до трёх последних содержательных реплик пользователя.
+
+    При правке черновика сохраняется исходный запрос первого черновика.
+    """
+    if session.draft and session.draft.get("source_message"):
+        return session.draft["source_message"]
+    texts = [m["content"] for m in session.ai_history if m["role"] == "user"]
+    texts.append(session.current_text)
+    texts = [t for t in texts if t and t != LEAD_HELP_TEXT]
+    return " / ".join(texts[-3:])[:400]
+
+
 def prepare_lead_draft(
     session: Session,
     name: str,
@@ -66,7 +79,9 @@ def prepare_lead_draft(
     fields["service"] = _service_or_empty(service)
     fields["summary"] = validation.clean(summary)[:500]
     fields["missing_info"] = validation.clean(missing_info)[:300]
+    fields["source_message"] = _source_message(session)
     session.draft = fields
+    session.draft_editing = False
     session.user_confirmed = False
     return (
         "Черновик подготовлен и показан пользователю с кнопками подтверждения. "
@@ -88,8 +103,10 @@ def save_confirmed_lead(session: Session) -> int | None:
         service=d["service"],
         agent_summary=d["summary"],
         missing_info=d["missing_info"],
+        source_message=d["source_message"],
     )
     session.draft = None
+    session.draft_editing = False
     session.user_confirmed = False
     log.info("lead saved id=%s source=%s", lead_id, db.SOURCE_AI)
     return lead_id

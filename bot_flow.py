@@ -12,7 +12,7 @@ import agent_runtime
 import db
 import validation
 from agent import knowledge, tools
-from sessions import Session
+from sessions import LEAD_HELP_TEXT, Session
 
 log = logging.getLogger(__name__)
 
@@ -48,10 +48,23 @@ def _menu(prefix: str | None = None):
 
 
 def _draft_text(d: dict) -> str:
-    lines = ["Черновик заявки:", f"Имя: {d['name']}", f"Контакт: {d['contact']}"]
-    if d.get("service"):
-        lines.append(f"Услуга: {d['service']}")
-    lines.append(f"Задача: {d['problem']}")
+    """Структурированный черновик. Собирает runtime из проверенных полей, не модель."""
+    if "summary" not in d:  # обычная заявка: короткая форма
+        lines = ["Черновик заявки:", f"Имя: {d['name']}", f"Контакт: {d['contact']}"]
+        if d.get("service"):
+            lines.append(f"Услуга: {d['service']}")
+        lines.append(f"Задача: {d['problem']}")
+        return "\n".join(lines)
+    lines = [
+        "Черновик заявки",
+        f"Услуга: {d['service'] or 'не определена'}",
+        f"Задача: {d['problem']}",
+        f"Контакт: {d['name']}, {d['contact']}",
+        f"Что известно: {d['summary'] or '—'}",
+        f"Чего не хватает: {d['missing_info'] or 'менеджер ничего не уточняет'}",
+    ]
+    if d.get("source_message"):
+        lines.append(f"Исходный запрос: «{d['source_message']}»")
     return "\n".join(lines)
 
 
@@ -110,7 +123,7 @@ def _on_action(s: Session, action: str):
     if action == "ai_lead_help":
         if s.state != "ai":
             return _menu()
-        return _ai_turn(s, "Помоги мне оформить заявку.")
+        return _ai_turn(s, LEAD_HELP_TEXT)
     if action in ("confirm", "edit", "cancel"):
         return _on_confirm_action(s, action)
     return _menu()
@@ -185,6 +198,12 @@ def _lead_review_action(s: Session, action: str):
 
 def _draft_action(s: Session, action: str):
     if action == "confirm":
+        if s.draft_editing:
+            return _reply(
+                "Вы нажали «Изменить»: напишите правку, и я обновлю черновик, либо нажмите «Отмена».",
+                [("Отмена", "cancel"), BACK],
+                "Что изменить?",
+            )
         s.user_confirmed = True  # единственное место, где выставляется подтверждение
         lead_id = tools.save_confirmed_lead(s)
         if lead_id is None:
@@ -194,12 +213,15 @@ def _draft_action(s: Session, action: str):
             [("Задать вопрос", "ai_start"), BACK],
         )
     if action == "edit":
+        s.draft_editing = True
         return _reply(
-            "Напишите, что нужно изменить, например: «контакт — name@mail.ru».",
+            "Что нужно изменить? Например: «контакт — name@mail.ru» или «услуга — SMM-продвижение». "
+            "Подтвердить заявку можно будет после обновления черновика.",
             [("Отмена", "cancel"), BACK],
             "Что изменить?",
         )
     s.draft = None
+    s.draft_editing = False
     return _reply(
         "Черновик отменён. Можете задать другой вопрос.",
         [("Помоги с заявкой", "ai_lead_help"), BACK],
@@ -263,4 +285,6 @@ def _ai_turn(s: Session, text: str):
     if result.draft_updated and s.draft:
         messages.append(_draft_text(s.draft))
         return _reply(messages, CONFIRM_BUTTONS, "Продолжить диалог…")
+    if s.draft and s.draft_editing:  # правка не дала нового черновика: продолжаем уточнение
+        return _reply(messages, [("Отмена", "cancel"), BACK], "Что изменить?")
     return _reply(messages, [("Помоги с заявкой", "ai_lead_help"), BACK], "Ваш вопрос консультанту")

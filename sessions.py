@@ -5,6 +5,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
+LEAD_HELP_TEXT = "Помоги мне оформить заявку."  # текст кнопки «Помоги с заявкой»
 MAX_SESSIONS = 500
 TTL_SECONDS = 6 * 3600
 
@@ -16,6 +17,8 @@ class Session:
     form: dict = field(default_factory=dict)  # поля обычной заявки
     ai_history: list[dict] = field(default_factory=list)
     draft: dict | None = None  # черновик заявки ИИ-консультанта
+    draft_editing: bool = False  # пользователь нажал «Изменить», ждём правку
+    current_text: str = ""  # сообщение пользователя, обрабатываемое сейчас
     user_confirmed: bool = False  # выставляется только обработчиком кнопки
     last_seen: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -25,6 +28,8 @@ class Session:
         self.form = {}
         self.ai_history = []
         self.draft = None
+        self.draft_editing = False
+        self.current_text = ""
         self.user_confirmed = False
 
 

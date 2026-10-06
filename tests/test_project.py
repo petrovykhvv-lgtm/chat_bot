@@ -285,3 +285,96 @@ def test_rate_limit_message(client, monkeypatch):
     chat(client, action="ai_start")
     d = chat(client, text="Сколько стоит реклама?")
     assert "Лимит" in d["messages"][0]
+
+
+# --- фаза 4: confirmation flow ----------------------------------------------
+
+AI_LEAD = "Имя: Мария, контакт: maria@example.com, задача: запуск таргетированной рекламы для кофейни"
+
+
+def test_draft_is_structured_and_not_saved(client):
+    chat(client, action="ai_start")
+    d = chat(client, text=AI_LEAD)
+    text = "\n".join(d["messages"])
+    for block in ("Услуга:", "Задача:", "Контакт: Мария, maria@example.com", "Что известно:",
+                  "Чего не хватает:", "Исходный запрос:"):
+        assert block in text, block
+    assert "Таргетированная реклама" in text
+    assert [b["label"] for b in d["buttons"]] == ["Отправить заявку", "Изменить", "Отмена"]
+    assert db.fetch_all("leads") == []  # черновик создан, лид не сохранён
+
+
+def test_edit_returns_to_clarification_then_confirm_saves_updated(client):
+    chat(client, action="ai_start")
+    chat(client, text=AI_LEAD)
+    e = chat(client, action="edit")
+    assert "изменить" in e["messages"][0].lower()
+    assert [b["action"] for b in e["buttons"]] == ["cancel", "menu"]
+
+    stale = chat(client, action="confirm")  # старый черновик подтвердить нельзя
+    assert "Изменить" in stale["messages"][0]
+    assert db.fetch_all("leads") == []
+
+    d = chat(client, text="контакт — maria.new@example.com")
+    assert "maria.new@example.com" in "\n".join(d["messages"])
+    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel"]
+    assert db.fetch_all("leads") == []
+
+    chat(client, action="confirm")
+    (lead,) = db.fetch_all("leads")
+    assert lead["source"] == "ai_consultant"
+    assert lead["contact"] == "maria.new@example.com"
+    assert lead["service"] == "Таргетированная реклама"
+    assert "кофейни" in lead["source_message"]  # исходный запрос сохранился после правки
+    assert lead["status"] == "new" and lead["agent_summary"]
+
+
+def test_cancel_creates_no_lead_and_blocks_confirm(client):
+    chat(client, action="ai_start")
+    chat(client, text=AI_LEAD)
+    chat(client, action="cancel")
+    chat(client, action="confirm")
+    assert db.fetch_all("leads") == []
+
+
+def test_cancel_during_edit(client):
+    chat(client, action="ai_start")
+    chat(client, text=AI_LEAD)
+    chat(client, action="edit")
+    chat(client, action="cancel")
+    chat(client, action="confirm")
+    assert db.fetch_all("leads") == []
+
+
+def test_three_kinds_are_distinguishable(client):
+    chat(client, action="lead_start")
+    chat(client, action="svc:none")
+    chat(client, text="Иван")
+    chat(client, text="ivan@example.com")
+    chat(client, text="Нужна реклама")
+    chat(client, action="confirm")
+    chat(client, action="ai_start")
+    chat(client, text=AI_LEAD)
+    chat(client, action="confirm")
+    chat(client, action="feedback_start")
+    chat(client, text="Отлично")
+    assert db.counts_by_kind() == {"bot_flow": 1, "ai_consultant": 1, "feedback": 1}
+    assert {r["source"] for r in db.fetch_all("leads")} == {"bot_flow", "ai_consultant"}
+
+
+def test_old_database_is_migrated(tmp_path, monkeypatch):
+    import sqlite3
+
+    old = tmp_path / "old.sqlite3"
+    with sqlite3.connect(old) as c:
+        c.execute(
+            "CREATE TABLE leads (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+            " source TEXT NOT NULL, service TEXT NOT NULL DEFAULT '', name TEXT NOT NULL,"
+            " contact TEXT NOT NULL, problem_text TEXT NOT NULL, agent_summary TEXT NOT NULL DEFAULT '',"
+            " missing_info TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'new',"
+            " created_at TEXT NOT NULL DEFAULT '')"
+        )
+    monkeypatch.setattr(config, "DB_PATH", old)
+    db.init_db()
+    assert db.save_lead(session_id="s", source="bot_flow", name="Иван", contact="a@b.ru",
+                        problem_text="x", source_message="y") == 1
