@@ -1,0 +1,16 @@
+[Unit]
+Description=Vector chat bot (single Python runtime)
+After=network.target
+
+[Service]
+Type=simple
+User=chatbot
+WorkingDirectory=/opt/chatbot
+EnvironmentFile=/opt/chatbot/.env
+ExecStart=/opt/chatbot/.venv/bin/python server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

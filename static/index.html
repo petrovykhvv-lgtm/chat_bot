@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вектор — чат-бот</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="chat">
+    <header class="chat__header">
+      <span class="chat__title">Вектор</span>
+      <span class="chat__subtitle">Чат-бот рекламного агентства</span>
+    </header>
+    <section id="messages" class="messages" aria-live="polite"></section>
+    <nav id="buttons" class="buttons" aria-label="Действия"></nav>
+    <form id="form" class="composer" autocomplete="off">
+      <input id="input" type="text" maxlength="2000" placeholder="Напишите сообщение…" aria-label="Сообщение">
+      <button type="submit" id="send">Отправить</button>
+    </form>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
