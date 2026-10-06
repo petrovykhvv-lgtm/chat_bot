@@ -4,6 +4,9 @@
   const $form = document.getElementById("form");
   const $input = document.getElementById("input");
   const $send = document.getElementById("send");
+  const $nav = document.getElementById("nav");
+  const $date = document.getElementById("date");
+  const $chip = document.getElementById("ai-chip");
 
   const store = {
     get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
@@ -23,6 +26,30 @@
     const saved = JSON.parse(store.get("chat") || "null");
     if (saved) { history = saved.history; lastBot = saved.lastBot; }
   } catch { /* повреждённая история игнорируется */ }
+
+  $date.textContent = new Date().toLocaleDateString("ru-RU", {
+    weekday: "long", day: "numeric", month: "long",
+  });
+
+  // Режим ИИ из /api/health: «модель» или «демо». Ошибка не мешает чату.
+  fetch("/api/health")
+    .then((r) => r.json())
+    .then((h) => {
+      $chip.textContent = h.ai === "model" ? "ИИ подключён" : "ИИ: демо-режим";
+      $chip.classList.toggle("is-demo", h.ai !== "model");
+      $chip.hidden = false;
+    })
+    .catch(() => { /* индикатор необязателен */ });
+
+  // Подсветка раздела в левой навигации.
+  const NAV_ACTIONS = ["menu", "services", "faq", "lead_start", "ai_start", "feedback_start"];
+  function setActive(action) {
+    const key = action === "start" ? "menu" : action;
+    if (!NAV_ACTIONS.includes(key)) return;
+    $nav.querySelectorAll(".nav__btn").forEach((b) =>
+      b.classList.toggle("is-active", b.dataset.action === key));
+    store.set("nav", key);
+  }
 
   function persist() {
     store.set("chat", JSON.stringify({ history, lastBot }));
@@ -58,6 +85,7 @@
       btn.type = "button";
       btn.textContent = b.label;
       btn.addEventListener("click", () => {
+        setActive(b.action);
         addMessage("user", b.label);
         send({ action: b.action });
       });
@@ -69,12 +97,18 @@
     $send.disabled = busy;
     $input.disabled = busy;
     $buttons.querySelectorAll("button").forEach((b) => { b.disabled = busy; });
+    $nav.querySelectorAll("button").forEach((b) => { b.disabled = busy; });
   }
 
   async function send(payload) {
     setBusy(true);
-    const typing = addMessage("bot", "Печатает…", false);
+    const typing = addMessage("bot", "", false);
     typing.classList.add("msg--typing");
+    typing.setAttribute("aria-label", "Печатает");
+    const dots = document.createElement("span");
+    dots.className = "dots";
+    dots.append(document.createElement("i"), document.createElement("i"), document.createElement("i"));
+    typing.append(dots);
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -98,6 +132,14 @@
     }
   }
 
+  $nav.addEventListener("click", (e) => {
+    const btn = e.target.closest(".nav__btn");
+    if (!btn || btn.disabled) return;
+    setActive(btn.dataset.action);
+    addMessage("user", btn.dataset.title);
+    send({ action: btn.dataset.action });
+  });
+
   $form.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = $input.value.trim();
@@ -108,6 +150,7 @@
   });
 
   // Старт: восстановить историю или запросить главное меню.
+  setActive(store.get("nav") || "menu");
   if (history.length) {
     history.forEach((m) => addMessage(m.role, m.text, false));
     setButtons(lastBot.buttons);

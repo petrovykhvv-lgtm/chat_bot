@@ -4,22 +4,66 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Вектор — чат-бот</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%277%27 fill=%27%232f5bea%27/%3E%3Cpath d=%27M8 9l8 15 8-15%27 stroke=%27white%27 stroke-width=%273.5%27 fill=%27none%27/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%2710%27 fill=%27%23ee6a2c%27/%3E%3Cpath d=%27M8 9l8 15 8-15%27 stroke=%27white%27 stroke-width=%273.5%27 fill=%27none%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="chat">
-    <header class="chat__header">
-      <span class="chat__title">Вектор</span>
-      <span class="chat__subtitle">Чат-бот рекламного агентства</span>
-    </header>
-    <section id="messages" class="messages" aria-live="polite"></section>
-    <nav id="buttons" class="buttons" aria-label="Действия"></nav>
-    <form id="form" class="composer" autocomplete="off">
-      <input id="input" type="text" maxlength="2000" placeholder="Напишите сообщение…" aria-label="Сообщение">
-      <button type="submit" id="send">Отправить</button>
-    </form>
-  </main>
+  <div class="sky" aria-hidden="true"></div>
+
+  <div class="app">
+    <nav class="nav" id="nav" aria-label="Разделы">
+      <button type="button" class="nav__btn is-active" data-action="menu" data-title="Главное меню" title="Главное меню">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5h-5v5H5a1 1 0 0 1-1-1z"/></svg>
+        <span>Главная</span>
+      </button>
+      <button type="button" class="nav__btn" data-action="services" data-title="Услуги" title="Услуги">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7l9 9-6 6-9-9z"/><circle cx="8.5" cy="9.5" r="1.2"/></svg>
+        <span>Услуги</span>
+      </button>
+      <button type="button" class="nav__btn" data-action="faq" data-title="FAQ" title="FAQ">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.7 9.6a2.4 2.4 0 1 1 3.4 2.2c-.7.4-1.1.9-1.1 1.7M12 16.6v.1"/></svg>
+        <span>FAQ</span>
+      </button>
+      <button type="button" class="nav__btn" data-action="lead_start" data-title="Оставить заявку" title="Оставить заявку">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h7l4 4V19a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M14 3.5V8h4M9 13h6M9 16.5h4"/></svg>
+        <span>Заявка</span>
+      </button>
+      <button type="button" class="nav__btn" data-action="ai_start" data-title="ИИ-консультант" title="ИИ-консультант">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l1.8 4.7 4.7 1.8-4.7 1.8L12 16.5l-1.8-4.7L5.5 10l4.7-1.8z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>
+        <span>ИИ</span>
+      </button>
+      <button type="button" class="nav__btn" data-action="feedback_start" data-title="Обратная связь" title="Обратная связь">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14a1.5 1.5 0 0 1 1.5 1.5v8.5A1.5 1.5 0 0 1 19 17h-7l-4.5 3.5V17H5a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 5 5.5z"/><path d="M12 14.2s-3-1.8-3-3.9a1.7 1.7 0 0 1 3-1 1.7 1.7 0 0 1 3 1c0 2.1-3 3.9-3 3.9z"/></svg>
+        <span>Отзыв</span>
+      </button>
+    </nav>
+
+    <main class="main">
+      <header class="top">
+        <div class="top__text">
+          <p class="top__date" id="date"></p>
+          <h1 class="top__title">Здравствуйте.</h1>
+          <p class="top__sub">Я помощник рекламного агентства «Вектор»</p>
+        </div>
+        <div class="top__right">
+          <span class="chip" id="ai-chip" hidden></span>
+          <span class="avatar" aria-hidden="true">В</span>
+        </div>
+      </header>
+
+      <section class="chat" aria-label="Чат">
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <nav id="buttons" class="buttons" aria-label="Быстрые ответы"></nav>
+        <form id="form" class="composer" autocomplete="off">
+          <input id="input" type="text" maxlength="2000" placeholder="Напишите сообщение…" aria-label="Сообщение">
+          <button type="submit" id="send" aria-label="Отправить">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V6M6.5 11.5 12 6l5.5 5.5"/></svg>
+          </button>
+        </form>
+      </section>
+    </main>
+  </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>
