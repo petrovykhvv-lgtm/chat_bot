@@ -32,6 +32,7 @@ def _get_client():
             api_key=config.AI_API_KEY,
             base_url=config.AI_BASE_URL,
             timeout=config.AI_TIMEOUT,
+            max_retries=3,  # временные 429/503 у провайдера
         )
     return _client
 
@@ -58,6 +59,19 @@ def respond(session: Session, user_text: str) -> AgentResult:
     return AgentResult(text, draft_updated=session.draft is not None and session.draft is not before)
 
 
+def _tool_call_dict(call) -> dict:
+    d = {
+        "id": call.id,
+        "type": "function",
+        "function": {"name": call.function.name, "arguments": call.function.arguments},
+    }
+    # Gemini 3 требует вернуть thought_signature вместе с вызовом tool.
+    extra = (call.model_extra or {}).get("extra_content")
+    if extra:
+        d["extra_content"] = extra
+    return d
+
+
 def _model_reply(session: Session, user_text: str) -> str:
     system = config.SOUL_PATH.read_text(encoding="utf-8")
     messages = [{"role": "system", "content": system}, *session.ai_history]
@@ -74,14 +88,7 @@ def _model_reply(session: Session, user_text: str) -> str:
             {
                 "role": "assistant",
                 "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": c.id,
-                        "type": "function",
-                        "function": {"name": c.function.name, "arguments": c.function.arguments},
-                    }
-                    for c in msg.tool_calls
-                ],
+                "tool_calls": [_tool_call_dict(c) for c in msg.tool_calls],
             }
         )
         for c in msg.tool_calls:
