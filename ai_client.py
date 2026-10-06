@@ -24,6 +24,7 @@ def _get_client():
         _client = OpenAI(
             api_key=config.AI_API_KEY,
             base_url=config.AI_BASE_URL,
+            project=config.AI_PROJECT,
             timeout=config.AI_TIMEOUT,
             max_retries=3,  # временные 429/503 у провайдера
         )

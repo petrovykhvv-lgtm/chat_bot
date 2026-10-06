@@ -28,6 +28,7 @@ AI_BASE_URL = os.getenv(
     "AI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"
 )
 AI_MODEL = os.getenv("AI_MODEL", "gemini-3.5-flash-lite")
+AI_PROJECT = os.getenv("AI_PROJECT", "").strip() or None  # для Yandex AI Studio: ID каталога
 AI_TIMEOUT = float(os.getenv("AI_TIMEOUT", "30"))
 
 MAX_MESSAGE_LEN = 2000

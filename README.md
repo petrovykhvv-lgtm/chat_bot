@@ -79,7 +79,7 @@ python scripts/show_db.py      # содержимое leads и feedback
 | `03-ai-consultant.png` | ответ по базе знаний, отказ на просьбы прочитать `.env` и файл вне `knowledge/`, структурированный черновик с кнопками |
 | `04-sqlite-leads-feedback.png` | `leads` с разными `source` и отдельная таблица `feedback` |
 
-Пятый скриншот (`05-vps-runtime.png`) делается после запуска на VPS.
+`05-vps-runtime.png` — запуск на VPS: Python 3.13.16 в `venv`, сервис `active (running)`, health `"ai":"model"`, права 600 на `.env` и базу, счётчики по видам, журнал старта без секретов.
 
 ## Лимиты и биллинг AI Studio
 
@@ -100,6 +100,8 @@ python scripts/check_agent.py скидк .env # только кейсы по ч�
 ## Запуск на VPS
 
 Проверено на Ubuntu 26.04 (2 vCPU, 4 ГБ). Интерфейс слушает только `127.0.0.1`: домен, публичная ссылка и открытый порт не нужны. Один процесс `python server.py` под управлением systemd.
+
+> **Регион сервера.** Google AI Studio API недоступен из ряда стран, включая РФ: с российского VPS приходит `User location is not supported for the API use`. Проверено: с VPS в Финляндии с тем же ключом всё работает. Меню, услуги, FAQ, заявка и обратная связь работают на любом сервере и без ключа. Для сервера в РФ используйте OpenAI-совместимого провайдера, доступного из РФ (например, Yandex AI Studio): см. закомментированные `AI_BASE_URL`, `AI_MODEL`, `AI_PROJECT` в `.env.example`.
 
 **1. Python 3.13.** Если в репозиториях дистрибутива его нет (как в Ubuntu 26.04), ставим через `uv`:
 
@@ -136,7 +138,9 @@ cp deploy/chatbot.service /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now chatbot
 ```
 
-SQLite создаётся при старте в `/opt/chatbot/data/bot.sqlite3`.
+SQLite создаётся при старте в `/opt/chatbot/data/bot.sqlite3` (права 600 благодаря `UMask=0077` в юните). Каталог данных закройте для остальных: `chmod 750 /opt/chatbot/data`.
+
+Проверка после запуска: `systemctl status chatbot`, затем `curl -s http://127.0.0.1:8000/api/health`. В ответе `"ai":"model"` значит, что ключ подхвачен, `"ai":"demo"` — ключ пуст (бот работает без модели).
 
 **Управление**
 
