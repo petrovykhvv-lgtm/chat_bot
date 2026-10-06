@@ -10,7 +10,11 @@ EnvironmentFile=/opt/chatbot/.env
 ExecStart=/opt/chatbot/.venv/bin/python server.py
 Restart=on-failure
 RestartSec=3
+UMask=0077
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target

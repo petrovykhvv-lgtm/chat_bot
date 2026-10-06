@@ -99,26 +99,71 @@ python scripts/check_agent.py скидк .env # только кейсы по ч�
 
 ## Запуск на VPS
 
-Ubuntu 24.04, Python 3.13 (например, через `deadsnakes`):
+Проверено на Ubuntu 26.04 (2 vCPU, 4 ГБ). Интерфейс слушает только `127.0.0.1`: домен, публичная ссылка и открытый порт не нужны. Один процесс `python server.py` под управлением systemd.
+
+**1. Python 3.13.** Если в репозиториях дистрибутива его нет (как в Ubuntu 26.04), ставим через `uv`:
 
 ```bash
-sudo apt install -y python3.13 python3.13-venv git
-sudo useradd -r -m -d /opt/chatbot chatbot
-sudo -u chatbot git clone https://github.com/petrovykhvv-lgtm/chat_bot.git /opt/chatbot
+apt-get update && apt-get install -y python3-venv python3-pip git
+python3 -m venv /opt/uv-tool && /opt/uv-tool/bin/pip install uv
+UV_PYTHON_INSTALL_DIR=/opt/python /opt/uv-tool/bin/uv python install 3.13
+ln -sf "$(ls -d /opt/python/cpython-3.13*/bin/python3.13 | head -1)" /usr/local/bin/python3.13
+python3.13 --version
+```
+
+**2. Код, окружение, зависимости** (от имени отдельного пользователя без shell):
+
+```bash
+useradd -r -s /usr/sbin/nologin -d /opt/chatbot chatbot
+mkdir -p /opt/chatbot && chown chatbot:chatbot /opt/chatbot && cd /opt/chatbot
+runuser -u chatbot -- git clone https://github.com/petrovykhvv-lgtm/chat_bot.git .
+runuser -u chatbot -- python3.13 -m venv .venv
+runuser -u chatbot -- .venv/bin/pip install -r requirements.txt
+```
+
+**3. `.env`** (настоящий файл только на сервере, в репозитории его нет). Ключ вводится скрыто, в историю команд и логи не попадает:
+
+```bash
 cd /opt/chatbot
-sudo -u chatbot python3.13 -m venv .venv
-sudo -u chatbot .venv/bin/pip install -r requirements.txt
-sudo -u chatbot cp .env.example .env && sudo -u chatbot nano .env    # AI_API_KEY
-sudo cp deploy/chatbot.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now chatbot
+runuser -u chatbot -- cp .env.example .env && chmod 600 .env
+read -rs -p "AI_API_KEY: " K && echo && sed -i "s|^AI_API_KEY=.*|AI_API_KEY=$K|" .env && unset K
 ```
 
-Проверка, что runtime запущен без ошибок:
+**4. Сервис:**
 
 ```bash
-systemctl status chatbot --no-pager
-journalctl -u chatbot -n 30 --no-pager
-curl -s http://127.0.0.1:8000/api/health     # {"status":"ok","ai":"model"}
+cp deploy/chatbot.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now chatbot
 ```
 
-Интерфейс слушает `127.0.0.1`. Чтобы открыть его с компьютера без публикации порта, используйте SSH-туннель: `ssh -L 8000:127.0.0.1:8000 user@vps`, затем http://127.0.0.1:8000.
+SQLite создаётся при старте в `/opt/chatbot/data/bot.sqlite3`.
+
+**Управление**
+
+```bash
+systemctl status chatbot --no-pager      # состояние
+systemctl stop chatbot                   # остановить
+systemctl start chatbot                  # запустить
+systemctl restart chatbot                # перезапустить (после правки .env)
+journalctl -u chatbot -n 50 --no-pager   # логи
+journalctl -u chatbot -f                 # логи в реальном времени
+curl -s http://127.0.0.1:8000/api/health # {"status":"ok","ai":"model"}
+```
+
+**Обновление версии**
+
+```bash
+cd /opt/chatbot
+runuser -u chatbot -- git pull
+runuser -u chatbot -- .venv/bin/pip install -r requirements.txt
+cp deploy/chatbot.service /etc/systemd/system/ && systemctl daemon-reload
+systemctl restart chatbot
+```
+
+**Проверка заявок на сервере**
+
+```bash
+cd /opt/chatbot && runuser -u chatbot -- .venv/bin/python scripts/show_db.py
+```
+
+Чтобы открыть интерфейс с компьютера без публикации порта, используйте SSH-туннель: `ssh -L 8000:127.0.0.1:8000 user@vps`, затем http://127.0.0.1:8000.
