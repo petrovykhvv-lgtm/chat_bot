@@ -70,7 +70,16 @@ python scripts/show_db.py      # содержимое leads и feedback
 
 Ручной прогон: `Услуги` → `FAQ` → `Оставить заявку` → `ИИ-консультант` (вопрос, затем «Помоги с заявкой») → `Отправить заявку` → `Обратная связь` → `python scripts/show_db.py`: в `leads` видны `bot_flow` и `ai_consultant`, в `feedback` — отзыв.
 
-Скриншоты лежат в `evidence/screenshots/`.
+Скриншоты локального прогона лежат в `evidence/screenshots/`:
+
+| Файл | Что показывает |
+|---|---|
+| `01-chat-main-menu.png` | главное меню и поле ввода |
+| `02-botflow-faq-lead.png` | FAQ по категориям и обычная заявка через `bot-flow` |
+| `03-ai-consultant.png` | ответ по базе знаний, отказ на просьбы прочитать `.env` и файл вне `knowledge/`, структурированный черновик с кнопками |
+| `04-sqlite-leads-feedback.png` | `leads` с разными `source` и отдельная таблица `feedback` |
+
+Пятый скриншот (`05-vps-runtime.png`) делается после запуска на VPS.
 
 ## Лимиты и биллинг AI Studio
 

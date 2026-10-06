@@ -41,16 +41,19 @@ def _service_or_empty(value: object) -> str:
 
 
 def _source_message(session: Session) -> str:
-    """Исходный запрос: до трёх последних содержательных реплик пользователя.
+    """Исходный запрос: одна содержательная реплика пользователя.
 
-    При правке черновика сохраняется исходный запрос первого черновика.
+    Берётся текущее сообщение; если черновик вызван кнопкой «Помоги с заявкой», то
+    последнее содержательное сообщение до неё. Склейка нескольких реплик не нужна:
+    в неё попадают отклонённые и посторонние запросы. При правке черновика
+    сохраняется исходный запрос первого черновика.
     """
     if session.draft and session.draft.get("source_message"):
         return session.draft["source_message"]
     texts = [m["content"] for m in session.ai_history if m["role"] == "user"]
     texts.append(session.current_text)
     texts = [t for t in texts if t and t != LEAD_HELP_TEXT]
-    return " / ".join(texts[-3:])[:400]
+    return texts[-1][:400] if texts else ""
 
 
 def prepare_lead_draft(
