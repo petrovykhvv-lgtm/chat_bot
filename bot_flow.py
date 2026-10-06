@@ -29,8 +29,9 @@ MENU_BUTTONS = [
     ("Обратная связь", "feedback_start"),
 ]
 CONFIRM_BUTTONS = [("Отправить заявку", "confirm"), ("Изменить", "edit"), ("Отмена", "cancel")]
-BACK = ("В меню", "menu")
-CANCEL = [("Отмена", "menu")]
+BACK = ("Вернуться в главное меню", "menu")
+CANCEL = [BACK]  # на шагах формы возврат в главное меню прерывает заполнение
+CONFIRM_ROW = CONFIRM_BUTTONS + [BACK]
 NO_SERVICE = "Пока не знаю"
 
 CONSENT_BUTTONS = [("Согласен(на)", "consent_yes"), ("Не согласен(на)", "consent_no")]
@@ -56,10 +57,22 @@ def _reply(messages, buttons=(), placeholder="Напишите сообщени�
     }
 
 
+GREETING = "Здравствуйте! Я помощник рекламного агентства «Aistudion». Выберите раздел в меню ниже."
+
+
 def _menu(prefix: str | None = None):
-    hint = "Выберите раздел в меню или напишите «меню»."
-    head = prefix or "Здравствуйте! Я помощник рекламного агентства «Вектор»."
-    return _reply([head, hint], MENU_BUTTONS)
+    """Главное меню без приветствия: короткая подпись или сообщение-префикс."""
+    if prefix:
+        return _reply([prefix, "Выберите раздел в меню ниже."], MENU_BUTTONS)
+    return _reply("Главное меню. Выберите раздел ниже.", MENU_BUTTONS)
+
+
+def _main_menu(s: Session):
+    """Приветствие показывается только при первом обращении, дальше — обычное меню."""
+    if not s.greeted:
+        s.greeted = True
+        return _reply(GREETING, MENU_BUTTONS)
+    return _menu()
 
 
 def _draft_text(d: dict) -> str:
@@ -103,7 +116,7 @@ def _now() -> str:
 def _on_action(s: Session, action: str):
     if action in ("start", "menu"):
         s.reset()
-        return _menu()
+        return _main_menu(s)
     if action in GATED and not s.consent_at:
         s.reset()
         s.state, s.pending_action = "consent", action  # продолжим после согласия
@@ -300,9 +313,9 @@ def _on_text(s: Session, text: str):
         if err:
             return _reply(err, CANCEL, "Описание задачи")
         s.form["problem"], s.state = value, "lead_review"
-        return _reply([_draft_text(s.form), "Отправить заявку?"], CONFIRM_BUTTONS)
+        return _reply([_draft_text(s.form), "Отправить заявку?"], CONFIRM_ROW)
     if st == "lead_review":
-        return _reply("Выберите действие кнопкой ниже.", CONFIRM_BUTTONS)
+        return _reply("Выберите действие кнопкой ниже.", CONFIRM_ROW)
     if st == "feedback":
         msg = validation.clean(text)
         if len(msg) < 3:
@@ -324,7 +337,7 @@ def _ai_turn(s: Session, text: str):
     messages = [result.text]
     if result.draft_updated and s.draft:
         messages.append(_draft_text(s.draft))
-        return _reply(messages, CONFIRM_BUTTONS, "Продолжить диалог…")
+        return _reply(messages, CONFIRM_ROW, "Продолжить диалог…")
     if s.draft and s.draft_editing:  # правка не дала нового черновика: продолжаем уточнение
         return _reply(messages, [("Отмена", "cancel"), BACK], "Что изменить?")
     return _reply(messages, [("Помоги с заявкой", "ai_lead_help"), BACK], "Ваш вопрос консультанту")

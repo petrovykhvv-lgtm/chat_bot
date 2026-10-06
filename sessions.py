@@ -24,6 +24,7 @@ _TYPES = {
     "draft_editing": bool,
     "consent_at": str,
     "pending_action": str,
+    "greeted": bool,
 }
 _PERSISTED = tuple(_TYPES)
 
@@ -38,13 +39,14 @@ class Session:
     draft_editing: bool = False  # пользователь нажал «Изменить», ждём правку
     consent_at: str = ""  # когда пользователь согласился на обработку данных
     pending_action: str = ""  # действие, отложенное до получения согласия
+    greeted: bool = False  # приветствие уже показано (оно только при первом обращении)
     current_text: str = ""  # сообщение пользователя, обрабатываемое сейчас
     user_confirmed: bool = False  # выставляется только обработчиком кнопки
     last_seen: float = field(default_factory=time.time)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def reset(self) -> None:
-        """Сброс диалога. Согласие на обработку данных сохраняется."""
+        """Сброс диалога. Согласие на обработку данных и факт приветствия сохраняются."""
         self.state = "menu"
         self.form = {}
         self.ai_history = []

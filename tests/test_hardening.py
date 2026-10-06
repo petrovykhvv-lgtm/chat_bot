@@ -463,6 +463,9 @@ def test_install_script_and_units_are_consistent():
     timer = (ROOT / "deploy" / "chatbot-backup.timer").read_text()
     assert "UMask=0077" in service and "scripts/backup_db.py" in backup and "OnCalendar" in timer
     assert os.access(script, os.X_OK)
+    # При `set -o pipefail` конвейеры с head/grep -q ловят SIGPIPE и роняют скрипт посреди установки.
+    code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    assert not [ln for ln in code if "| head" in ln or "| grep -q" in ln], "конвейер с ранним выходом под pipefail"
 
 
 def test_env_example_is_systemd_compatible():
@@ -477,3 +480,80 @@ def test_env_example_is_systemd_compatible():
 
     values = dotenv_values(ROOT / ".env.example")
     assert int(values["RATE_LIMIT_PER_MIN"]) == 60 and int(values["RETENTION_DAYS"]) == 365
+
+
+# --- приветствие и возврат в главное меню ------------------------------------
+
+GREETING = "Здравствуйте! Я помощник рекламного агентства «Aistudion». Выберите раздел в меню ниже."
+BACK_LABEL = "Вернуться в главное меню"
+
+
+def test_greeting_text_is_exact_and_only_on_first_contact(client):
+    first = chat(client, sid="greet-0001", action="start")
+    assert first["messages"] == [GREETING]
+    assert actions(first) == ["services", "faq", "lead_start", "ai_start", "feedback_start"]
+    for again in ("start", "menu"):  # повторные обращения: без приветствия
+        d = chat(client, sid="greet-0001", action=again)
+        assert d["messages"] == ["Главное меню. Выберите раздел ниже."]
+        assert actions(d)[:2] == ["services", "faq"]
+    assert chat(client, sid="greet-0001", text="меню")["messages"][0].startswith("Главное меню")
+
+
+def test_greeting_is_not_repeated_after_server_restart(client):
+    chat(client, sid="greet-0002", action="start")
+    sessions.store = sessions.SessionStore()  # «перезапуск»
+    assert GREETING not in chat(client, sid="greet-0002", action="start")["messages"]
+
+
+def test_each_new_visitor_gets_the_greeting(client):
+    assert chat(client, sid="greet-0003", action="start")["messages"] == [GREETING]
+    assert chat(client, sid="greet-0004", action="start")["messages"] == [GREETING]
+
+
+def test_greeting_not_shown_when_returning_via_other_flows(client):
+    chat(client, sid="greet-0005", action="start")
+    chat(client, sid="greet-0005", action="consent_yes")
+    chat(client, sid="greet-0005", action="lead_start")
+    d = chat(client, sid="greet-0005", action="cancel")  # отмена заявки → меню
+    assert "Aistudion" not in " ".join(d["messages"])
+
+
+def test_back_to_main_menu_is_available_on_every_screen(client):
+    sid = "back-0001"
+    chat(client, sid=sid, action="start")
+
+    def has_back(reply):
+        back = [b for b in reply["buttons"] if b["action"] == "menu"]
+        return back and back[0]["label"] == BACK_LABEL
+
+    screens = {
+        "услуги": chat(client, sid=sid, action="services"),
+        "FAQ": chat(client, sid=sid, action="faq"),
+        "категория FAQ": chat(client, sid=sid, action="faqc:0"),
+        "ответ FAQ": chat(client, sid=sid, action="faq:0"),
+        "согласие": chat(client, sid=sid, action="lead_start"),
+    }
+    chat(client, sid=sid, action="consent_yes")  # продолжает заявку: выбор услуги
+    screens["выбор услуги"] = chat(client, sid=sid, action="lead_start")
+    screens["имя"] = chat(client, sid=sid, action="svc:0")
+    screens["контакт"] = chat(client, sid=sid, text="Иван")
+    screens["задача"] = chat(client, sid=sid, text="ivan@example.com")
+    screens["подтверждение заявки"] = chat(client, sid=sid, text="Нужна реклама")
+    screens["отзыв"] = chat(client, sid=sid, action="feedback_start")
+    screens["консультант"] = chat(client, sid=sid, action="ai_start")
+    screens["черновик ИИ"] = chat(client, sid=sid, text="Имя: Мария, контакт: @maria_dev, задача: таргет для кофейни")
+    screens["правка черновика"] = chat(client, sid=sid, action="edit")
+    missing = [name for name, reply in screens.items() if not has_back(reply)]
+    assert not missing, f"нет кнопки «{BACK_LABEL}»: {missing}"
+
+
+def test_back_button_returns_to_main_menu_and_drops_unsaved_form(client):
+    sid = "back-0002"
+    chat(client, sid=sid, action="start")
+    chat(client, sid=sid, action="consent_yes")
+    chat(client, sid=sid, action="lead_start")
+    chat(client, sid=sid, action="svc:0")
+    d = chat(client, sid=sid, action="menu")
+    assert d["messages"] == ["Главное меню. Выберите раздел ниже."]
+    assert db.fetch_all("leads") == []
+    assert "Не понял" in " ".join(chat(client, sid=sid, text="Иван")["messages"])  # форма сброшена

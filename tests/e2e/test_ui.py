@@ -91,6 +91,18 @@ def say(pg, text):
     settle(pg)
 
 
+def test_greeting_only_on_first_visit_and_not_after_reload(page):
+    greeting = "Здравствуйте! Я помощник рекламного агентства «Aistudion». Выберите раздел в меню ниже."
+    assert page.locator(".msg--bot").first.inner_text() == greeting
+    page.reload()
+    settle(page)
+    assert page.locator(".msg--bot").all_inner_texts().count(greeting) == 1
+    click(page, "Услуги")
+    click(page, "Вернуться в главное меню")
+    assert page.locator(".msg--bot").last.inner_text() == "Главное меню. Выберите раздел ниже."
+    assert page.locator(".msg--bot").all_inner_texts().count(greeting) == 1
+
+
 def test_main_menu_has_five_modes_and_input(page):
     labels = page.locator("#buttons button").all_inner_texts()
     assert labels == ["Услуги", "FAQ", "Оставить заявку", "ИИ-консультант", "Обратная связь"]

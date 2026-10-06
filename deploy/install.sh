@@ -29,20 +29,23 @@ say "2/6 Python 3.13"
 if ! command -v python3.13 >/dev/null; then
   [ -x /opt/uv-tool/bin/uv ] || { python3 -m venv /opt/uv-tool && /opt/uv-tool/bin/pip install -q uv; }
   UV_PYTHON_INSTALL_DIR=/opt/python /opt/uv-tool/bin/uv python install 3.13
-  ln -sf "$(ls -d /opt/python/cpython-3.13*/bin/python3.13 | head -1)" /usr/local/bin/python3.13
+  PYBIN=(/opt/python/cpython-3.13*/bin/python3.13)
+  ln -sf "${PYBIN[0]}" /usr/local/bin/python3.13
 fi
 python3.13 --version
 
 say "3/6 Пользователь и код"
 id "$APP_USER" >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d "$APP_DIR" "$APP_USER"
 mkdir -p "$APP_DIR" && chown "$APP_USER:$APP_USER" "$APP_DIR"
-git config --global --get-all safe.directory | grep -qx "$APP_DIR" || git config --global --add safe.directory "$APP_DIR"
+# Без конвейеров с `head`/`grep -q`: при pipefail они завершаются ошибкой SIGPIPE и роняют скрипт.
+SAFE_DIRS="$(git config --global --get-all safe.directory || true)"
+grep -qx "$APP_DIR" <<<"$SAFE_DIRS" || git config --global --add safe.directory "$APP_DIR"
 if [ -d "$APP_DIR/.git" ]; then
   as_app git -C "$APP_DIR" pull -q --ff-only origin "$BRANCH"
 else
   as_app git clone -q -b "$BRANCH" "$REPO_URL" "$APP_DIR"
 fi
-as_app git -C "$APP_DIR" log --oneline | head -1
+as_app git -C "$APP_DIR" log -1 --oneline
 
 say "4/6 Окружение и зависимости"
 [ -d "$APP_DIR/.venv" ] || as_app python3.13 -m venv "$APP_DIR/.venv"

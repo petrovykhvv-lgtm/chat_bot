@@ -119,14 +119,14 @@ def test_sources_and_feedback_are_separate(client):
     chat(client, text="Иван")
     chat(client, text="ivan@example.com")
     d = chat(client, text="Нужна реклама в VK")
-    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel"]
+    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel", "menu"]
     assert db.fetch_all("leads") == []  # до подтверждения не сохраняется
     chat(client, action="confirm")
 
     # заявка из ИИ-консультанта
     chat(client, action="ai_start")
     d = chat(client, text="Имя: Мария, контакт: @maria_dev, задача: запуск рекламы")
-    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel"]
+    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel", "menu"]
     assert len(db.fetch_all("leads")) == 1
     chat(client, action="confirm")
 
@@ -310,7 +310,7 @@ def test_draft_is_structured_and_not_saved(client):
                   "Чего не хватает:", "Исходный запрос:"):
         assert block in text, block
     assert "Таргетированная реклама" in text
-    assert [b["label"] for b in d["buttons"]] == ["Отправить заявку", "Изменить", "Отмена"]
+    assert [b["label"] for b in d["buttons"]] == ["Отправить заявку", "Изменить", "Отмена", "Вернуться в главное меню"]
     assert db.fetch_all("leads") == []  # черновик создан, лид не сохранён
 
 
@@ -327,7 +327,7 @@ def test_edit_returns_to_clarification_then_confirm_saves_updated(client):
 
     d = chat(client, text="контакт — maria.new@example.com")
     assert "maria.new@example.com" in "\n".join(d["messages"])
-    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel"]
+    assert [b["action"] for b in d["buttons"]] == ["confirm", "edit", "cancel", "menu"]
     assert db.fetch_all("leads") == []
 
     chat(client, action="confirm")
