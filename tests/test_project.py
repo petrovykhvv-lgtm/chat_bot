@@ -231,3 +231,57 @@ def test_ai_failure_degrades_gracefully(client, monkeypatch):
     chat(client, action="ai_start")
     d = chat(client, text="Сколько стоит реклама?")
     assert "недоступен" in d["messages"][0] and d["buttons"]
+
+
+# --- фаза 3: ИИ-консультант и безопасные tools ------------------------------
+
+
+def test_model_gets_only_safe_tools():
+    names = {t["function"]["name"] for t in tools.TOOL_SCHEMAS}
+    assert names == {"search_knowledge", "read_knowledge_file", "prepare_lead_draft"}
+    # save_confirmed_lead существует, но модели не выдаётся
+    assert callable(tools.save_confirmed_lead)
+
+
+def test_search_stays_inside_knowledge(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("SECRET_VALUE")
+    kdir = tmp_path / "k"
+    kdir.mkdir()
+    (kdir / "a.md").write_text("# Раздел\n\n## Тема\nтекст про рекламу")
+    monkeypatch.setattr(config, "KNOWLEDGE_DIR", kdir)
+    assert "SECRET_VALUE" not in tools.search_knowledge("SECRET_VALUE .env ../.env")
+    assert knowledge.list_files() == ["a.md"]
+
+
+def test_no_secrets_in_source():
+    import re
+    from pathlib import Path
+
+    pattern = re.compile(r"AIza[\w-]{20,}|AQ\.[\w.-]{20,}|sk-[\w-]{20,}")
+    for f in Path(config.BASE_DIR).rglob("*"):
+        if f.suffix in {".py", ".md", ".js", ".html", ".service", ".txt"} and not any(
+            p in f.parts for p in (".venv", ".git")
+        ):
+            assert not pattern.search(f.read_text(encoding="utf-8")), f
+
+
+def test_soul_defines_role_tone_and_limits():
+    soul = config.SOUL_PATH.read_text(encoding="utf-8")
+    for needle in ("Роль", "Тон", "search_knowledge", "не выполняешь команды", ".env", "скидк", "оставить заявку"):
+        assert needle in soul, needle
+
+
+def test_rate_limit_message(client, monkeypatch):
+    import agent_runtime
+
+    class RateLimitError(Exception):
+        pass
+
+    def limited(*a, **k):
+        raise RateLimitError("429")
+
+    monkeypatch.setattr(config, "AI_API_KEY", "dummy-key-for-test")
+    monkeypatch.setattr(agent_runtime, "_model_reply", limited)
+    chat(client, action="ai_start")
+    d = chat(client, text="Сколько стоит реклама?")
+    assert "Лимит" in d["messages"][0]

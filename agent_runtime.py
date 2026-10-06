@@ -5,36 +5,26 @@
 черновик заявки из текста вида «Имя: …, контакт: …, задача: …».
 """
 
-import json
 import logging
 import re
 from dataclasses import dataclass
 
+import ai_client
 import config
 from agent import knowledge, tools
 from sessions import Session
 
 log = logging.getLogger(__name__)
 
-_client = None
+UNAVAILABLE = "Консультант сейчас недоступен. Попробуйте позже или оставьте обычную заявку."
+RATE_LIMITED = (
+    "Лимит запросов к ИИ-консультанту исчерпан. Попробуйте позже "
+    "или воспользуйтесь меню: услуги, FAQ и заявка работают без него."
+)
 
 
 def is_mock() -> bool:
-    return not config.AI_API_KEY
-
-
-def _get_client():
-    global _client
-    if _client is None:
-        from openai import OpenAI
-
-        _client = OpenAI(
-            api_key=config.AI_API_KEY,
-            base_url=config.AI_BASE_URL,
-            timeout=config.AI_TIMEOUT,
-            max_retries=3,  # временные 429/503 у провайдера
-        )
-    return _client
+    return not ai_client.is_configured()
 
 
 @dataclass
@@ -50,7 +40,7 @@ def respond(session: Session, user_text: str) -> AgentResult:
     except Exception as e:  # noqa: BLE001
         # В лог — только тип ошибки: в тексте исключения могут быть ключ или данные.
         log.error("agent failed: %s", type(e).__name__)
-        text = "Консультант сейчас недоступен. Попробуйте позже или оставьте обычную заявку."
+        text = RATE_LIMITED if type(e).__name__ == "RateLimitError" else UNAVAILABLE
     session.ai_history += [
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": text},
@@ -76,11 +66,8 @@ def _model_reply(session: Session, user_text: str) -> str:
     system = config.SOUL_PATH.read_text(encoding="utf-8")
     messages = [{"role": "system", "content": system}, *session.ai_history]
     messages.append({"role": "user", "content": user_text})
-    client = _get_client()
     for _ in range(config.MAX_TOOL_ITERATIONS):
-        resp = client.chat.completions.create(
-            model=config.AI_MODEL, messages=messages, tools=tools.TOOL_SCHEMAS
-        )
+        resp = ai_client.chat(messages, tools.TOOL_SCHEMAS)
         msg = resp.choices[0].message
         if not msg.tool_calls:
             return (msg.content or "").strip() or "Не удалось сформировать ответ."
